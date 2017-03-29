@@ -3,7 +3,6 @@ convert gml to json
 
 #### Install ####
 ```shell
-git clone http://git.96900.com.cn:8080/fengweijie/go2json.git
 cd go2json
 go build
 ```
