@@ -5,11 +5,11 @@ type Gml struct {
 }
 
 type FeatureMember struct {
-	SmUserID         int     `xml:"SmUserID"`
-	Id               float64 `xml:"ID"`
+	SmUserID         uint16  `xml:"SmUserID"`
+	Id               float32 `xml:"ID"`
 	Area             float32 `xml:"AREA"`
 	Refname          string  `xml:"REFNAME"`
-	Node             int64   `xml:"NODE"`
-	Tag              int     `xml:"TAG"`
+	Node             uint16  `xml:"NODE"`
+	Tag              uint16  `xml:"TAG"`
 	GeometryProperty string  `xml:"geometryProperty>Polygon>exterior>LinearRing>posList"`
 }

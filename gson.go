@@ -22,11 +22,11 @@ type Features struct {
 }
 
 type Properties struct {
-	Id      int     `json:"ID"`
+	Id      uint16  `json:"ID"`
 	Area    float32 `json:"AREA"`
 	Refname string  `json:"REFNAME"`
-	Node    int64   `json:"NODE"`
-	Tag     int     `json:"TAG"`
+	Node    uint16  `json:"NODE"`
+	Tag     uint16  `json:"TAG"`
 }
 
 type Geometry struct {

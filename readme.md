@@ -1,5 +1,5 @@
 ## gml2json ##
-convert gml to json
+#####convert gml to json#####
 
 #### Install ####
 ```shell
@@ -14,10 +14,11 @@ Usage: gml2json [options...]
 
 Options:
   -i  Input gml file. (default "example.gml")
-  -o  Output json type. (default "convert.json")
+  -o  Output json file. (default "convert.json")
+  -c  Config file. (default "config.yaml")
 
 Example:
 
-  gml2json -i example.gml -o example.json
+  gml2json -i example.gml -o example.json -c config.yaml
 
 ```

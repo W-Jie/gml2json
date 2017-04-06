@@ -1,20 +1,32 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"encoding/xml"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
+
+	"github.com/jinzhu/configor"
+	_ "github.com/mattn/go-oci8"
 )
 
 var (
-	infile  = flag.String("i", "example.gml", "")
-	outfile = flag.String("o", "convert.json", "")
+	count    = 0
+	sqlcount = 0
+	wg       = &sync.WaitGroup{}
+	gson     []byte
+)
+
+var (
+	infile     = flag.String("i", "example.gml", "")
+	outfile    = flag.String("o", "convert.json", "")
+	configfile = flag.String("c", "config.yaml", "")
 )
 
 var usage = `
@@ -22,35 +34,40 @@ Usage: gml2json [options...]
 
 Options:
   -i  Input gml file. (default "example.gml")
-  -o  Output json type. (default "convert.json")
+  -o  Output json file. (default "convert.json")
+  -c  Config file. (default "config.yaml")
 
 Example:
 
-  gml2json -i example.gml -o example.json 
+  gml2json -i example.gml -o example.json -c config.yaml
 `
 
-var gson []byte
-
 func main() {
+	log.SetFlags(log.Lshortfile | log.LstdFlags)
+
 	flag.Usage = func() {
 		fmt.Fprint(os.Stderr, usage)
 	}
 	flag.Parse()
 
-	ifile, err := ioutil.ReadFile(*infile)
+	Config := Config{}
+	configor.Load(&Config, *configfile)
 
-	//fix xml unmarshal error:  encoding "GB2312" declared but Decoder.CharsetReader is nil
-	content := strings.Replace(string(ifile), "GB2312", "UTF-8", 1)
+	os.Setenv("NLS_LANG", "")
 
+	// 用户名/密码@实例名
+	connect := Config.DB.User + "/" + Config.DB.Password + "@" + Config.DB.Sid
+	db, err := sql.Open("oci8", connect)
 	if err != nil {
-		log.Fatalln(err)
-		return
+		log.Fatal(err)
 	}
-	log.Printf("read file [%s] successfully!\n", *infile)
+	defer db.Close()
+
+	content := readfile(*infile)
 
 	var gml Gml
 
-	err = xml.Unmarshal([]byte(content), &gml)
+	err = xml.Unmarshal(content, &gml)
 	if err != nil {
 		log.Fatalln(err)
 		return
@@ -75,21 +92,34 @@ func main() {
 		}
 		coordinates = append(coordinates, coordinate)
 
+		geometry := Geometry{
+			Type:        "Polygon",
+			Coordinates: coordinates,
+		}
+
 		ftr := Features{
 			Type: "Feature",
 			Properties: Properties{
-				Id:      int(fMenber.Id),
+				Id:      uint16(fMenber.Id),
 				Area:    fMenber.Area,
 				Refname: fMenber.Refname,
 				Node:    fMenber.Node,
 				Tag:     fMenber.Tag,
 			},
-			Geometry: Geometry{
-				Type:        "Polygon",
-				Coordinates: coordinates,
-			},
+			Geometry: geometry,
 		}
 		features = append(features, ftr)
+
+		record, err := json.Marshal(&geometry)
+		if err != nil {
+			log.Fatalln(err)
+			return
+		}
+		count += 1
+
+		wg.Add(1)
+		go insertdb(db, fMenber.SmUserID, uint16(fMenber.Id), fMenber.Area, fMenber.Refname, fMenber.Node, fMenber.Tag, string(record))
+
 	}
 
 	j := Gson{
@@ -109,13 +139,17 @@ func main() {
 		return
 	}
 
-	// save to file
-	ofile, err := os.OpenFile(*outfile, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0666)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	defer ofile.Close()
+	savefile(*outfile)
+	wg.Wait()
+	log.Printf("转换已完成！解析数据量: %d ，成功入库量: %d ", count, sqlcount)
+}
 
-	ofile.WriteString(string(gson))
-	log.Printf("save to file [%s] successfully!\n", *outfile)
+func insertdb(db *sql.DB, smuserid uint16, id uint16, area float32, refname string, node uint16, tag uint16, geometry string) {
+	_, err := db.Exec("insert into TESTTABLE(smuserid,id, area, refname, node, tag, geometry) values(:1,:2,:3,:4,:5,:6,:7)", smuserid, id, area, refname, node, tag, geometry)
+	if err != nil {
+		log.Println(err)
+	} else {
+		sqlcount += 1
+	}
+	wg.Done()
 }
