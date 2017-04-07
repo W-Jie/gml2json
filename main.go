@@ -53,6 +53,8 @@ func main() {
 	Config := Config{}
 	configor.Load(&Config, *configfile)
 
+	log.Printf("starting %s ", Config.APPName)
+
 	//os.Setenv("NLS_LANG", "")
 
 	// 用户名/密码@实例名

@@ -1,5 +1,4 @@
-appname: test
-
+appname: gml2json
 
 # create table geojson
 # (
