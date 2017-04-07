@@ -16,7 +16,7 @@ func readfile(file string) []byte {
 	if err != nil {
 		log.Fatalln(err)
 	}
-	log.Printf("read file [%s] successfully!\n", file)
+	log.Printf("成功读取文件 [%s]\n", file)
 
 	return []byte(content)
 }
@@ -30,5 +30,5 @@ func savefile(file string) {
 	defer ofile.Close()
 
 	ofile.WriteString(string(gson))
-	log.Printf("save to file [%s] successfully!\n", file)
+	log.Printf("保存成功 [%s] \n", file)
 }

@@ -6,6 +6,6 @@ type Config struct {
 	DB struct {
 		User     string `required:"true"`
 		Password string `required:"true"`
-		Sid      string `required:"true"`
+		Tnsname  string `required:"true"`
 	}
 }

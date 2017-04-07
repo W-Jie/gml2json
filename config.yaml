@@ -1,0 +1,19 @@
+appname: test
+
+
+# create table geojson
+# (
+#   smuserid NUMBER,
+#   id       NUMBER,
+#   area     NUMBER(5,2),
+#   refname  NUMBER,
+#   node     NUMBER,
+#   tag      NUMBER,
+#   geometry CLOB
+# )
+
+db:
+    user:     username
+    password: password
+    tnsname:  tnsname
+

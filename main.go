@@ -53,10 +53,10 @@ func main() {
 	Config := Config{}
 	configor.Load(&Config, *configfile)
 
-	os.Setenv("NLS_LANG", "")
+	//os.Setenv("NLS_LANG", "")
 
 	// 用户名/密码@实例名
-	connect := Config.DB.User + "/" + Config.DB.Password + "@" + Config.DB.Sid
+	connect := Config.DB.User + "/" + Config.DB.Password + "@" + Config.DB.Tnsname
 	db, err := sql.Open("oci8", connect)
 	if err != nil {
 		log.Fatal(err)
@@ -145,7 +145,7 @@ func main() {
 }
 
 func insertdb(db *sql.DB, smuserid uint16, id uint16, area float32, refname string, node uint16, tag uint16, geometry string) {
-	_, err := db.Exec("insert into TESTTABLE(smuserid,id, area, refname, node, tag, geometry) values(:1,:2,:3,:4,:5,:6,:7)", smuserid, id, area, refname, node, tag, geometry)
+	_, err := db.Exec("insert into geojson(smuserid,id, area, refname, node, tag, geometry) values(:1,:2,:3,:4,:5,:6,:7)", smuserid, id, area, refname, node, tag, geometry)
 	if err != nil {
 		log.Println(err)
 	} else {
