@@ -3,9 +3,9 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
-	"encoding/xml"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"strconv"
@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/beevik/etree"
 	"github.com/garyburd/redigo/redis"
 	"github.com/jinzhu/configor"
 	_ "github.com/mattn/go-oci8"
@@ -45,25 +46,13 @@ Options:
   -o    Output json file. (default: "convert.json")
   -c    Config file. (default: "config.yaml")
   -t    Geojson type, max|mid|min. (default: "max")
-  -ver  Geojson version.Format: YYYY-MM-DD,Exmple：20170101。(default: "20170101")
+  -ver  Geojson version.Format: YYYY-MM-DD,Exmple：20170101.(default: "20170101")
   -db   Enable save to database. (default: false)
 
 Example:
 
   gml2json -i example.gml -o example.json -c config.yaml -t max -ver 20170101
 `
-
-// type Record struct {
-// 	Smuserid uint64    `json:"smuserid"`
-// 	Id       uint16    `json:"id"`
-// 	Area     float32   `json:"area"`
-// 	Refname  string    `json:"refname"`
-// 	Node     uint16    `json:"node"`
-// 	Tag      uint16    `json:"tag"`
-// 	Geometry string    `json:"geometry"`
-// 	Created  time.Time `json:"created"`
-// 	Updated  time.Time `json:"updated"`
-// }
 
 var redisclient *redis.Pool
 
@@ -99,6 +88,13 @@ func main() {
 			c.Do("SELECT", config.Redis.Database)
 			return c, nil
 		}, // 建立连接
+		TestOnBorrow: func(c redis.Conn, t time.Time) error { // 测试链接可用性
+			if time.Since(t) < time.Minute {
+				return nil
+			}
+			_, err := c.Do("PING")
+			return err
+		},
 	}
 	r := redisclient.Get()                // 获得连接
 	ok, err := redis.String(r.Do("PING")) // 选择数据库
@@ -120,69 +116,146 @@ func main() {
 	}
 	defer db.Close()
 
-	content := readfile(*infile)
+	doc := etree.NewDocument()
+	doc.ReadSettings.CharsetReader = func(charset string, input io.Reader) (io.Reader, error) {
+		return input, nil
+	}
+	doc.ReadSettings.Permissive = true
 
-	var gml Gml
-
-	err = xml.Unmarshal(content, &gml)
-	if err != nil {
-		log.Fatalln(err)
-		return
+	if err := doc.ReadFromFile(*infile); err != nil {
+		panic(err)
 	}
 
 	features := []Features{}
+	for _, featureMember := range doc.FindElements("//featureMember") {
 
-	for _, fMenber := range gml.FeatureMember {
+		var smuserid, refid, districtid, id, oriid uint32
+		var area float64
+		var refname, name, ver, class, verdate, geometryType string
+
+		if SmUserID := featureMember.FindElement("*/SmUserID"); SmUserID != nil {
+			tmp, _ := strconv.Atoi(SmUserID.Text())
+			smuserid = uint32(tmp)
+		}
+		if AREA := featureMember.FindElement("*/AREA"); AREA != nil {
+			tmp, _ := strconv.ParseFloat(AREA.Text(), 64)
+			area = tmp
+		}
+		if REFNAME := featureMember.FindElement("*/REFNAME"); REFNAME != nil {
+			refname = REFNAME.Text()
+		}
+		if NAME := featureMember.FindElement("*/NAME"); NAME != nil {
+			name = NAME.Text()
+		}
+		if REFID := featureMember.FindElement("*/REFID"); REFID != nil {
+			tmp, _ := strconv.Atoi(REFID.Text())
+			refid = uint32(tmp)
+		}
+		if DISTRICTID := featureMember.FindElement("*/DISTRICTID"); DISTRICTID != nil {
+			tmp, _ := strconv.Atoi(DISTRICTID.Text())
+			districtid = uint32(tmp)
+		}
+		if VER := featureMember.FindElement("*/VER"); VER != nil {
+			ver = VER.Text()
+		}
+		if CLASS := featureMember.FindElement("*/CLASS"); CLASS != nil {
+			class = CLASS.Text()
+		}
+		if ID := featureMember.FindElement("*/ID"); ID != nil {
+			tmp, _ := strconv.Atoi(ID.Text())
+			id = uint32(tmp)
+		}
+		if VERDATE := featureMember.FindElement("*/VERDATE"); VERDATE != nil {
+			verdate = VERDATE.Text()
+		}
+
+		if oriID := featureMember.FindElement("*/oriID"); oriID != nil {
+			tmp, _ := strconv.Atoi(oriID.Text())
+			oriid = uint32(tmp)
+
+		}
+
+		if gType := featureMember.FindElement("*/geometryProperty"); gType != nil {
+			geometryType = gType.ChildElements()[0].Tag
+		}
 
 		coordinates := make([]interface{}, 0)
-		coordinate := make([]interface{}, 0)
 
-		for _, line := range strings.Split(strings.TrimSpace(fMenber.GeometryProperty), "\n") {
-			line = strings.Replace(strings.TrimSpace(line), "\t", "", -1)
-			point := make([]float64, 0)
-			for _, value := range strings.Split(line, " ") {
-				p, _ := strconv.ParseFloat(value, 64)
-				point = append(point, p)
+		for _, posList := range featureMember.FindElements("//posList") {
+
+			coordinate := make([]interface{}, 0)
+			for _, line := range strings.Split(strings.TrimSpace(posList.Text()), "\n") {
+				line = strings.Replace(strings.TrimSpace(line), "\t", "", -1)
+				point := make([]float64, 0)
+				for _, value := range strings.Split(line, " ") {
+					p, _ := strconv.ParseFloat(value, 64)
+					point = append(point, p)
+				}
+				coordinate = append(coordinate, point)
+
 			}
-			coordinate = append(coordinate, point)
-
+			if geometryType == "MultiSurface" {
+				multCoordinates := make([]interface{}, 0)
+				multCoordinates = append(multCoordinates, coordinate)
+				coordinates = append(coordinates, multCoordinates)
+			} else {
+				coordinates = append(coordinates, coordinate)
+			}
 		}
-		coordinates = append(coordinates, coordinate)
 
-		geometry := Geometry{
-			Type:        "Polygon",
-			Coordinates: coordinates,
+		fMember := FeatureMember{
+			SmUserID: uint32(smuserid),
+			Properties: Properties{
+				Area:       area,
+				RefName:    refname,
+				Name:       name,
+				RefID:      uint32(refid),
+				DistrictID: uint32(districtid),
+				Ver:        ver,
+				Class:      class,
+				Id:         uint32(id),
+				VerDate:    verdate,
+				OriID:      uint32(oriid),
+			},
+
+			Geometry: Geometry{
+				Type:        geometryType,
+				Coordinates: coordinates,
+			},
+			Created: time.Now(),
+			Updated: time.Now(),
 		}
+
+		count += 1
+
+		wg.Add(1)
+		go insertredis(redisclient, haskkey, fMember)
 
 		ftr := Features{
-			Type: "Feature",
-			Properties: Properties{
-				Id:      uint16(fMenber.Id),
-				Area:    fMenber.Area,
-				Refname: fMenber.Refname,
-				Node:    fMenber.Node,
-				Tag:     fMenber.Tag,
+			Type:       "Feature",
+			Properties: fMember.Properties,
+			Geometry: Geometry{
+				Type:        geometryType,
+				Coordinates: coordinates,
 			},
-			Geometry: geometry,
 		}
+
 		features = append(features, ftr)
 
-		record, err := json.Marshal(&geometry)
+		//geojson 保存到数据库
+		record, err := json.Marshal(&ftr.Geometry)
 		if err != nil {
 			log.Fatalln(err)
 			return
 		}
-		count += 1
-
-		wg.Add(1)
-		go insertredis(redisclient, haskkey, fMenber.SmUserID, uint16(fMenber.Id), fMenber.Area, fMenber.Refname, fMenber.Node, fMenber.Tag, coordinates)
 
 		if *save2db {
 			wg.Add(1)
-			go insertdb(db, fMenber.SmUserID, uint16(fMenber.Id), fMenber.Area, fMenber.Refname, fMenber.Node, fMenber.Tag, string(record))
+			go insertdb(db, fMember, string(record))
 		}
 	}
 
+	//geojson 保存到文件
 	j := Gson{
 		Type: "FeatureCollection",
 		Crs: Crs{
@@ -201,12 +274,13 @@ func main() {
 	}
 
 	savefile(*outfile)
+
 	wg.Wait()
 	log.Printf("转换已完成！解析数据量: %d ，成功入库量(启用:%v): %d ,Redis新建/更新量：%d/%d ", count, *save2db, sqlcount, redisCreateCnt, redisUpdateCnt)
 }
 
-func insertdb(db *sql.DB, smuserid uint16, id uint16, area float32, refname string, node uint16, tag uint16, geometry string) {
-	_, err := db.Exec("insert into geojson(smuserid,id, area, refname, node, tag, geometry) values(:1,:2,:3,:4,:5,:6,:7)", smuserid, id, area, refname, node, tag, geometry)
+func insertdb(db *sql.DB, fm FeatureMember, geometry string) {
+	_, err := db.Exec("insert into geojson(smuserid, id, area, name, refid, refname, districtid, class, ver, verdate, oriid, geometry) values(:1,:2,:3,:4,:5,:6,:7,:8,:9,:10,:11,:12)", fm.SmUserID, fm.Id, fm.Area, fm.Name, fm.RefID, fm.RefName, fm.DistrictID, fm.Class, fm.Ver, fm.VerDate, fm.OriID, geometry)
 	if err != nil {
 		log.Println(err)
 	} else {
@@ -215,29 +289,15 @@ func insertdb(db *sql.DB, smuserid uint16, id uint16, area float32, refname stri
 	wg.Done()
 }
 
-func insertredis(redisclient *redis.Pool, haskkey string, smuserid uint16, id uint16, area float32, refname string, node uint16, tag uint16, coordinates []interface{}) {
-	record := &Record{
-		Smuserid: smuserid,
-		Id:       id,
-		Area:     area,
-		Refname:  refname,
-		Node:     node,
-		Tag:      tag,
-		Geometry: Geometry{
-			Type:        "Polygon",
-			Coordinates: coordinates,
-		},
-		Created: time.Now(),
-		Updated: time.Now(),
-	}
+func insertredis(redisclient *redis.Pool, haskkey string, fm FeatureMember) {
 
-	hashvalue, err := json.Marshal(&record)
+	hashvalue, err := json.Marshal(&fm)
 	if err != nil {
 		log.Println(err)
 	}
 
 	r := redisclient.Get()
-	created, err := redis.Bool(r.Do("HSET", haskkey, smuserid, (hashvalue)))
+	created, err := redis.Bool(r.Do("HSET", haskkey, fm.Id, hashvalue))
 	if err != nil {
 		log.Println(err)
 	} else {
