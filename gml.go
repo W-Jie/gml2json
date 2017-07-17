@@ -6,8 +6,6 @@ type FeatureMember struct {
 	SmUserID uint32 `json:"smuserid"` //格式转换生成的id
 	Properties
 
-	//GeometryProperty string `xml:"geometryProperty>Polygon>exterior>LinearRing>posList" json:"-"`
-
 	Center   Center    `json:"center"`   //区域中心点坐标，预留字段
 	Geometry Geometry  `json:"geometry"` //区域坐标点
 	Created  time.Time `json:"created"`  //创建时间，示例：2017-07-11T09:42:30.6541063+08:00

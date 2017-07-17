@@ -5,7 +5,7 @@ import (
 	"os"
 )
 
-func savefile(file string) {
+func savefile(file, context string) {
 	// save to file
 	ofile, err := os.OpenFile(file, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0666)
 	if err != nil {
@@ -13,6 +13,6 @@ func savefile(file string) {
 	}
 	defer ofile.Close()
 
-	ofile.WriteString(string(gson))
+	ofile.WriteString(context)
 	log.Printf("保存成功 [%s] \n", file)
 }

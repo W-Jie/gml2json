@@ -273,7 +273,7 @@ func main() {
 		return
 	}
 
-	savefile(*outfile)
+	savefile(*outfile, string(gson))
 
 	wg.Wait()
 	log.Printf("转换已完成！解析数据量: %d ，成功入库量(启用:%v): %d ,Redis新建/更新量：%d/%d ", count, *save2db, sqlcount, redisCreateCnt, redisUpdateCnt)
