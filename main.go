@@ -77,8 +77,8 @@ func main() {
 	haskkey := *hasktype + "/v:" + *haskversion
 
 	redisclient = &redis.Pool{
-		MaxIdle:     config.Redis.MaxIdle,                   // 最大的空闲连接数
-		MaxActive:   config.Redis.MaxActive,                 // 最大的激活连接数
+		MaxIdle: config.Redis.MaxIdle, // 最大的空闲连接数
+		//MaxActive:   config.Redis.MaxActive,                 // 最大的激活连接数
 		IdleTimeout: config.Redis.IdleTimeout * time.Second, // 最大的空闲连接等待时间
 		Dial: func() (redis.Conn, error) {
 			c, err := redis.Dial(config.Redis.Network, config.Redis.Address)
