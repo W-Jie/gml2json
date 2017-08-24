@@ -11,11 +11,11 @@ type Config struct {
 		Tnsname  string `default:"tnsname" required:"true"`
 	}
 
-	Redis struct {
+	Tile38 struct {
 		Network     string        `default:"tcp"  required:"true"`
-		Address     string        `default:"127.0.0.1:6379"  required:"true"`
+		Address     string        `default:"127.0.0.1:9851"  required:"true"`
 		MaxIdle     int           `default:1`
 		IdleTimeout time.Duration `default:120`
-		Database    int           `default:0`
+		//Database    int           `default:0`
 	}
 }

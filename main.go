@@ -17,6 +17,7 @@ import (
 	"github.com/garyburd/redigo/redis"
 	"github.com/jinzhu/configor"
 	_ "github.com/mattn/go-oci8"
+	"github.com/tidwall/sjson"
 )
 
 var (
@@ -77,15 +78,16 @@ func main() {
 	haskkey := *hasktype + "/v:" + *haskversion
 
 	redisclient = &redis.Pool{
-		MaxIdle: config.Redis.MaxIdle, // 最大的空闲连接数
-		//MaxActive:   config.Redis.MaxActive,                 // 最大的激活连接数
-		IdleTimeout: config.Redis.IdleTimeout * time.Second, // 最大的空闲连接等待时间
+		MaxIdle: config.Tile38.MaxIdle, // 最大的空闲连接数
+		//MaxActive:   config.Tile38.MaxActive,                 // 最大的激活连接数
+		IdleTimeout: config.Tile38.IdleTimeout * time.Second, // 最大的空闲连接等待时间
 		Dial: func() (redis.Conn, error) {
-			c, err := redis.Dial(config.Redis.Network, config.Redis.Address)
+			c, err := redis.Dial(config.Tile38.Network, config.Tile38.Address)
 			if err != nil {
 				panic(err.Error())
 			}
-			c.Do("SELECT", config.Redis.Database)
+			//c.Do("SELECT", config.Tile38.Database)
+			//c.Do("OUTPUT", "JSON") //设置输出格式为json
 			return c, nil
 		}, // 建立连接
 		TestOnBorrow: func(c redis.Conn, t time.Time) error { // 测试链接可用性
@@ -101,7 +103,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	} else if ok == "PONG" {
-		log.Printf("成功连接Redis：%v://%v, DB:%d", config.Redis.Network, config.Redis.Address, config.Redis.Database)
+		log.Printf("成功连接Redis：%v://%v", config.Tile38.Network, config.Tile38.Address)
 	}
 
 	defer r.Close()
@@ -180,32 +182,47 @@ func main() {
 		}
 
 		coordinates := make([]interface{}, 0)
-
-		for _, posList := range featureMember.FindElements("//posList") {
-
-			coordinate := make([]interface{}, 0)
-			for _, line := range strings.Split(strings.TrimSpace(posList.Text()), "\n") {
-				line = strings.Replace(strings.TrimSpace(line), "\t", "", -1)
-				point := make([]float64, 0)
-				for _, value := range strings.Split(line, " ") {
-					p, _ := strconv.ParseFloat(value, 64)
-					point = append(point, p)
-				}
-				coordinate = append(coordinate, point)
-
-			}
-			if geometryType == "MultiSurface" {
+		if geometryType == "MultiSurface" {
+			geometryType = "MultiPolygon"
+			for _, surfaceMember := range featureMember.FindElements("//surfaceMember") {
 				multCoordinates := make([]interface{}, 0)
-				multCoordinates = append(multCoordinates, coordinate)
+				for _, posList := range surfaceMember.FindElements("//posList") {
+					coordinate := make([]interface{}, 0)
+					for _, line := range strings.Split(strings.TrimSpace(posList.Text()), "\n") {
+						line = strings.Replace(strings.TrimSpace(line), "\t", "", -1)
+						point := make([]float64, 0)
+						for _, value := range strings.Split(line, " ") {
+							p, _ := strconv.ParseFloat(value, 64)
+							point = append(point, p)
+						}
+						coordinate = append(coordinate, point)
+					}
+					multCoordinates = append(multCoordinates, coordinate)
+				}
 				coordinates = append(coordinates, multCoordinates)
-			} else {
+			}
+		} else {
+			for _, posList := range featureMember.FindElements("//posList") {
+				coordinate := make([]interface{}, 0)
+				for _, line := range strings.Split(strings.TrimSpace(posList.Text()), "\n") {
+					line = strings.Replace(strings.TrimSpace(line), "\t", "", -1)
+					point := make([]float64, 0)
+					for _, value := range strings.Split(line, " ") {
+						p, _ := strconv.ParseFloat(value, 64)
+						point = append(point, p)
+					}
+					coordinate = append(coordinate, point)
+				}
 				coordinates = append(coordinates, coordinate)
 			}
 		}
 
-		fMember := FeatureMember{
-			SmUserID: uint32(smuserid),
+		count += 1
+
+		ftr := Features{
+			Type: "Feature",
 			Properties: Properties{
+				SmUserID:   uint32(smuserid),
 				Area:       area,
 				RefName:    refname,
 				Name:       name,
@@ -217,41 +234,21 @@ func main() {
 				VerDate:    verdate,
 				OriID:      uint32(oriid),
 			},
-
-			Geometry: Geometry{
-				Type:        geometryType,
-				Coordinates: coordinates,
-			},
-			Created: time.Now(),
-			Updated: time.Now(),
-		}
-
-		count += 1
-
-		wg.Add(1)
-		go insertredis(redisclient, haskkey, fMember)
-
-		ftr := Features{
-			Type:       "Feature",
-			Properties: fMember.Properties,
 			Geometry: Geometry{
 				Type:        geometryType,
 				Coordinates: coordinates,
 			},
 		}
-
 		features = append(features, ftr)
 
-		//geojson 保存到数据库
-		record, err := json.Marshal(&ftr.Geometry)
-		if err != nil {
-			log.Fatalln(err)
-			return
-		}
+		// 保存到redis
+		wg.Add(1)
+		go insertredis(redisclient, haskkey, ftr)
 
+		// 保存到database
 		if *save2db {
 			wg.Add(1)
-			go insertdb(db, fMember, string(record))
+			go insertdb(db, ftr)
 		}
 	}
 
@@ -279,8 +276,13 @@ func main() {
 	log.Printf("转换已完成！解析数据量: %d ，成功入库量(启用:%v): %d ,Redis新建/更新量：%d/%d ", count, *save2db, sqlcount, redisCreateCnt, redisUpdateCnt)
 }
 
-func insertdb(db *sql.DB, fm FeatureMember, geometry string) {
-	_, err := db.Exec("insert into geojson(smuserid, id, area, name, refid, refname, districtid, class, ver, verdate, oriid, geometry) values(:1,:2,:3,:4,:5,:6,:7,:8,:9,:10,:11,:12)", fm.SmUserID, fm.Id, fm.Area, fm.Name, fm.RefID, fm.RefName, fm.DistrictID, fm.Class, fm.Ver, fm.VerDate, fm.OriID, geometry)
+func insertdb(db *sql.DB, fm Features) {
+	geometry, err := json.Marshal(fm.Geometry)
+	if err != nil {
+		log.Fatalln(err)
+		return
+	}
+	_, err = db.Exec("insert into geojson(smuserid, id, area, name, refid, refname, districtid, class, ver, verdate, oriid, geometry) values(:1,:2,:3,:4,:5,:6,:7,:8,:9,:10,:11,:12)", fm.Properties.SmUserID, fm.Properties.Id, fm.Properties.Area, fm.Properties.Name, fm.Properties.RefID, fm.Properties.RefName, fm.Properties.DistrictID, fm.Properties.Class, fm.Properties.Ver, fm.Properties.VerDate, fm.Properties.OriID, geometry)
 	if err != nil {
 		log.Println(err)
 	} else {
@@ -289,20 +291,26 @@ func insertdb(db *sql.DB, fm FeatureMember, geometry string) {
 	wg.Done()
 }
 
-func insertredis(redisclient *redis.Pool, haskkey string, fm FeatureMember) {
+func insertredis(redisclient *redis.Pool, haskkey string, fm Features) {
 
 	hashvalue, err := json.Marshal(&fm)
 	if err != nil {
 		log.Println(err)
 	}
 
+	hashvalue, _ = sjson.SetBytes(hashvalue, "properties.center.lon", 0) // 中心点坐标，经度
+	hashvalue, _ = sjson.SetBytes(hashvalue, "properties.center.lat", 0) // 中心点坐标，经度
+	//t := time.Now()
+	// hashvalue, _ = sjson.SetBytes(hashvalue, "properties.created", t)   // 创建时间，示例：2017-07-11T09:42:30.6541063+08:00
+	// hashvalue, _ = sjson.SetBytes(hashvalue, "properties.updated", t)   // //更新时间，示例：2017-07-11T09:42:30.6541063+08:00
+
 	r := redisclient.Get()
-	created, err := redis.Bool(r.Do("HSET", haskkey, fm.Id, hashvalue))
+	created, err := r.Do("SET", haskkey, fm.Properties.Id, "OBJECT", string(hashvalue))
 	if err != nil {
-		log.Println(err)
+		log.Printf("%v:,haskkey:%v, fm.Properties.Id:%v, hashvalue:%v\n", err, haskkey, fm.Properties.Id, string(hashvalue))
 	} else {
 		mu.Lock()
-		if created {
+		if created == "OK" {
 			redisCreateCnt += 1
 		} else {
 			redisUpdateCnt += 1

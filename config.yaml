@@ -16,9 +16,8 @@ db:
     password: password
     tnsname:  tnsname
 
-redis:
+tile38:
     network: tcp
-    address: "127.0.0.1:6379"  
+    address: "127.0.0.1:9851"  
     maxidle: 2
     idletimeout: 300
-    database: 0
