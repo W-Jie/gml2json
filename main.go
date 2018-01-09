@@ -21,6 +21,8 @@ import (
 )
 
 var (
+	version        = "v1.0.0"
+	build          = "not set"
 	count          = 0
 	sqlcount       = 0
 	redisCreateCnt = 0
@@ -28,34 +30,41 @@ var (
 	wg             = &sync.WaitGroup{}
 	mu             sync.Mutex
 	gson           []byte
+	redisclient    *redis.Pool
 )
 
 var (
 	infile      = flag.String("i", "example.gml", "")
 	outfile     = flag.String("o", "convert.json", "")
 	configfile  = flag.String("c", "config.yaml", "")
-	hasktype    = flag.String("t", "max", "")
-	haskversion = flag.String("ver", "20170101", "")
+	hashtype    = flag.String("t", "max", "")
+	hashversion = flag.String("ver", "20170101", "")
 	save2db     = flag.Bool("db", false, "")
+	ver         = flag.Bool("v", false, "show version and exit")
 )
 
 var usage = `
 Usage: gml2json [options...]
 
 Options:
+  -c    Config file. (default: "config.yaml")
   -i    Input gml file. (default: "example.gml")
   -o    Output json file. (default: "convert.json")
-  -c    Config file. (default: "config.yaml")
   -t    Geojson type, max|mid|min. (default: "max")
-  -ver  Geojson version.Format: YYYY-MM-DD,Exmple：20170101.(default: "20170101")
+  -v    Show version and exit.
+  -ver  Geojson version. Format: YYYYMMDD, Example：20170101. (default: "20170101")
   -db   Enable save to database. (default: false)
 
 Example:
 
-  gml2json -i example.gml -o example.json -c config.yaml -t max -ver 20170101
+  gml2json -i example.gml -o example.json -c config.yaml -t max -ver 20170101 -db
 `
 
-var redisclient *redis.Pool
+func showVersion() {
+	fmt.Println(os.Args[0])
+	fmt.Printf("version: %s\n", version)
+	fmt.Printf("build  : %s\n", build)
+}
 
 func main() {
 	log.SetFlags(log.Lshortfile | log.LstdFlags)
@@ -64,6 +73,11 @@ func main() {
 		fmt.Fprint(os.Stderr, usage)
 	}
 	flag.Parse()
+
+	if *ver {
+		showVersion()
+		return
+	}
 
 	config := Config{}
 	err := configor.Load(&config, *configfile)
@@ -75,7 +89,7 @@ func main() {
 
 	log.Printf("开始运行 %s ", config.APPName)
 
-	haskkey := *hasktype + "/v:" + *haskversion
+	haskkey := *hashtype + "/v:" + *hashversion
 
 	redisclient = &redis.Pool{
 		MaxIdle: config.Tile38.MaxIdle, // 最大的空闲连接数
@@ -242,8 +256,9 @@ func main() {
 		features = append(features, ftr)
 
 		// 保存到redis
-		wg.Add(1)
-		go insertredis(redisclient, haskkey, ftr)
+		//wg.Add(1)
+		//go insertredis(redisclient, haskkey, ftr)
+		insertredis(redisclient, haskkey, ftr)
 
 		// 保存到database
 		if *save2db {
@@ -292,7 +307,7 @@ func insertdb(db *sql.DB, fm Features) {
 }
 
 func insertredis(redisclient *redis.Pool, haskkey string, fm Features) {
-
+	//defer wg.Done()
 	hashvalue, err := json.Marshal(&fm)
 	if err != nil {
 		log.Println(err)
@@ -305,6 +320,7 @@ func insertredis(redisclient *redis.Pool, haskkey string, fm Features) {
 	// hashvalue, _ = sjson.SetBytes(hashvalue, "properties.updated", t)   // //更新时间，示例：2017-07-11T09:42:30.6541063+08:00
 
 	r := redisclient.Get()
+	defer r.Close()
 	created, err := r.Do("SET", haskkey, fm.Properties.Id, "OBJECT", string(hashvalue))
 	if err != nil {
 		log.Printf("%v:,haskkey:%v, fm.Properties.Id:%v, hashvalue:%v\n", err, haskkey, fm.Properties.Id, string(hashvalue))
@@ -317,6 +333,4 @@ func insertredis(redisclient *redis.Pool, haskkey string, fm Features) {
 		}
 		mu.Unlock()
 	}
-	defer r.Close()
-	defer wg.Done()
 }
